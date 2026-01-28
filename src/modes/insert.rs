@@ -7,6 +7,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         // Exit insert mode
         KeyCode::Esc => {
             app.set_mode(Mode::Normal);
+            app.clear_pending_command();
         }
         KeyCode::Char('[') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.set_mode(Mode::Normal);

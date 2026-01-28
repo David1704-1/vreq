@@ -90,21 +90,65 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.set_cursor(new_cursor);
         }
         KeyCode::Char('$') => {
-            // Move cursor to end of current line
-            let buffer = app.current_buffer();
-            let cursor = app.cursor();
-            let (line, _) = app.cursor_to_line_col(buffer, cursor);
+            match app.pending_command {
+                Some(cmd) => {
+                    match cmd {
+                        PendingCommand::Delete => {
+                            let cursor = app.cursor();
+                            let (current_line, line_cursor) = {
+                                let buffer = app.current_buffer();
+                                app.cursor_to_line_col(buffer, cursor)
+                            };
 
-            let lines: Vec<&str> = buffer.lines().collect();
-            if line < lines.len() {
-                let line_len = lines[line].len();
-                let new_cursor = app.line_col_to_cursor(buffer, line, line_len);
-                app.set_cursor(new_cursor);
+                            if let Some(buffer) = app.current_buffer_mut() {
+                                let mut lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+                                if current_line < lines.len() {
+                                    if let Some(delete_line) = lines[current_line].get(0..line_cursor) {
+                                        lines[current_line] =  delete_line.to_string();
+                                    } 
+                                    *buffer = lines.join("\n");
+                                }
+                            }
+                            app.clear_pending_command();
+                        },
+                        PendingCommand::Yank => {
+                            let cursor = app.cursor();
+                            let (current_line, line_cursor) = {
+                                let buffer = app.current_buffer();
+                                app.cursor_to_line_col(buffer, cursor)
+                            };
+
+                            if let Some(buffer) = app.current_buffer_mut() {
+                                let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+                                if let Some(yank_line) = lines[current_line].get(0..line_cursor) {
+                                    app.set_yank_register(yank_line.to_string());
+                                } 
+                            }
+                            app.clear_pending_command();
+                        },
+                        PendingCommand::Goto => {},
+                    }
+                },
+                _ => {
+                    // Move cursor to end of current line
+                    let buffer = app.current_buffer();
+                    let cursor = app.cursor();
+                    let (line, _) = app.cursor_to_line_col(buffer, cursor);
+
+                    let lines: Vec<&str> = buffer.lines().collect();
+                    if line < lines.len() {
+                        let line_len = lines[line].len();
+                        let new_cursor = app.line_col_to_cursor(buffer, line, line_len);
+                        app.set_cursor(new_cursor);
+                    }
+
+                }
             }
         }
         KeyCode::Char('g') => {
             if let Some(cmd) = app.pending_command && cmd == PendingCommand::Goto {
-                app.set_cursor(0) 
+                app.set_cursor(0);
+                app.clear_pending_command();
             } else if app.pending_command.is_none() {
                 app.set_pending_command(PendingCommand::Goto);
             }
@@ -128,20 +172,93 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             // 4. Switch active panel to Response
         }
         KeyCode::Char('d') => {
-            // TODO: Enter delete mode or delete based on motion
-            // dd - delete line
-            // dw - delete word
-            // d$ - delete to end of line
-            app.set_pending_command(PendingCommand::Delete);
+            // TODO: Delete with motions (dw - delete word, d$ - delete to end of line)
+            if let Some(cmd) = app.pending_command && cmd == PendingCommand::Delete {
+                // dd - delete current line
+                let cursor = app.cursor();
+                let current_line = {
+                    let buffer = app.current_buffer();
+                    let (line, _) = app.cursor_to_line_col(buffer, cursor);
+                    line
+                };
+
+                // Perform the deletion
+                if let Some(buffer) = app.current_buffer_mut() {
+                    let mut lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+
+                    if current_line < lines.len() {
+                        lines.remove(current_line);
+                        *buffer = lines.join("\n");
+                    }
+                }
+
+                // Calculate new cursor position after deletion (mutable borrow has ended)
+                let buffer = app.current_buffer();
+                let lines: Vec<&str> = buffer.lines().collect();
+                let new_line = current_line.min(lines.len().saturating_sub(1));
+                let new_cursor = if buffer.is_empty() {
+                    0
+                } else {
+                    app.line_col_to_cursor(buffer, new_line, 0)
+                };
+                app.set_cursor(new_cursor);
+
+                app.clear_pending_command();
+            } else if app.pending_command.is_none() {
+                app.set_pending_command(PendingCommand::Delete);
+            }
         }
         KeyCode::Char('y') => {
-            // TODO: Enter yank/copy mode
-            // yy - yank line
-            // yw - yank word
-            app.set_pending_command(PendingCommand::Yank);
+            if let Some(cmd) = app.pending_command && cmd == PendingCommand::Yank {
+                let cursor = app.cursor();
+                let current_line = {
+                    let buffer = app.current_buffer();
+                    let (line, _) = app.cursor_to_line_col(buffer, cursor);
+                    line
+                };
+
+                if let Some(buffer) = app.current_buffer_mut() {
+                    let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+
+                    if current_line < lines.len() {
+                        app.set_yank_register(lines[current_line].to_string());
+
+                    }
+                }
+
+                app.clear_pending_command();
+            } else if app.pending_command.is_none() {
+                app.set_pending_command(PendingCommand::Yank);
+            }
         }
         KeyCode::Char('p') => {
-            // TODO: Paste from clipboard/register
+            if let Some(yanked_content) = &app.yank_register.clone() {
+                let cursor = app.cursor();
+                let current_line = {
+                    let buffer = app.current_buffer();
+                    let (line, _) = app.cursor_to_line_col(buffer, cursor);
+                    line
+                };
+
+                if let Some(buffer) = app.current_buffer_mut() {
+                    let mut lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+
+                    if lines.is_empty() {
+                        lines.push(yanked_content.clone());
+                    } else if current_line < lines.len() {
+                        lines.insert(current_line + 1, yanked_content.clone());
+                    } else {
+                        lines.push(yanked_content.clone());
+                    }
+
+                    *buffer = lines.join("\n");
+                }
+
+                let buffer = app.current_buffer();
+                let new_line = (current_line + 1).min(buffer.lines().count().saturating_sub(1));
+                let new_cursor = app.line_col_to_cursor(buffer, new_line, 0);
+                app.set_cursor(new_cursor);
+            }
         }
         KeyCode::Char('u') => {
             // TODO: Undo last change

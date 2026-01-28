@@ -1,5 +1,3 @@
-use crossterm::event::KeyCode;
-
 use crate::http::{Request, Response};
 use std::collections::HashMap;
 
@@ -70,6 +68,8 @@ pub struct App {
 
     /// Selected header row (when editing headers)
     pub headers_selected: usize,
+
+    pub yank_register: Option<String>
 }
 
 impl App {
@@ -101,6 +101,7 @@ impl App {
             sidebar_selected: 0,
             headers_selected: 0,
             pending_command: None,
+            yank_register: None,
         }
     }
 
@@ -130,6 +131,14 @@ impl App {
 
     pub fn set_pending_command(&mut self, cmd: PendingCommand) {
         self.pending_command = Some(cmd);
+    }
+
+    pub fn clear_pending_command(&mut self) {
+        self.pending_command = None;
+    }
+
+    pub fn set_yank_register(&mut self, register: String) {
+        self.yank_register = Some(register)
     }
 
     /// Get the current buffer content for the active panel

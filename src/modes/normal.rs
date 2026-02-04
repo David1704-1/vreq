@@ -1,4 +1,4 @@
-use crate::{app::{App, Mode, Panel, PendingCommand}, http::{Request, send_request, Method}};
+use crate::{app::{App, Mode, Panel, PendingCommand}, http::{Request, send_request}};
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {

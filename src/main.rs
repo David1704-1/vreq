@@ -21,14 +21,18 @@ use ratatui::{
 };
 use std::io;
 
+use crate::persistence::list_collections;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture, Show)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    let collections = list_collections()?;
 
     let mut app = App::new();
+    app.set_collections(collections);
     let res = run_app(&mut terminal, &mut app);
 
     disable_raw_mode()?;

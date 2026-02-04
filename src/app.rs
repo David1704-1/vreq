@@ -1,4 +1,4 @@
-use crate::http::{Request, Response};
+use crate::{http::{Request, Response}, persistence::{Collection, list_collections}};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +40,6 @@ pub struct App {
     pub scroll_offsets: HashMap<Panel, u16>,
     pub should_quit: bool,
     pub collections: Vec<String>,
-    pub sidebar_selected: usize,
     pub yank_register: Option<String>,
     pub visual_anchor: Option<usize>,
 }
@@ -73,7 +72,6 @@ impl App {
                 "My Requests".to_string(),
                 "API Tests".to_string(),
             ],
-            sidebar_selected: 0,
             pending_command: None,
             yank_register: None,
             visual_anchor: None,
@@ -84,6 +82,10 @@ impl App {
         &self.response_buffer
     }
 
+    pub fn set_collections(&mut self, collections: Vec<String>) {
+        self.collections = collections;
+
+    }
     pub fn update_response_buffer(&mut self) {
         self.response_buffer = if let Some(ref response) = self.last_response {
             format!("Status: {}\n\n{}", response.status, response.body)

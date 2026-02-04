@@ -1,22 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// HTTP methods
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Method {
+    #[default]
     GET,
     POST,
     PUT,
     DELETE,
     PATCH,
-    HEAD,
-    OPTIONS,
-}
-
-impl Default for Method {
-    fn default() -> Self {
-        Method::GET
-    }
 }
 
 impl std::fmt::Display for Method {
@@ -27,13 +19,23 @@ impl std::fmt::Display for Method {
             Method::PUT => write!(f, "PUT"),
             Method::DELETE => write!(f, "DELETE"),
             Method::PATCH => write!(f, "PATCH"),
-            Method::HEAD => write!(f, "HEAD"),
-            Method::OPTIONS => write!(f, "OPTIONS"),
         }
     }
 }
 
-/// HTTP request structure
+impl From<String> for Method {
+    fn from(value: String) -> Method {
+        match value.as_str() {
+            "GET" => Method::GET,
+            "POST" => Method::POST,
+            "PUT" => Method::PUT,
+            "DELETE" => Method::DELETE,
+            "PATCH" => Method::PATCH,
+            _ => Method::GET
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub method: Method,
@@ -74,7 +76,6 @@ impl Request {
     }
 }
 
-/// HTTP response structure
 #[derive(Debug, Clone)]
 pub struct Response {
     pub status: u16,
@@ -84,75 +85,53 @@ pub struct Response {
     pub duration_ms: u128,
 }
 
-impl Response {
-    pub fn new(status: u16, status_text: String, body: String) -> Self {
-        Self {
-            status,
-            status_text,
+impl Default for Response {
+    fn default() -> Self {
+        Response {
+            status: u16::MAX,
+            status_text: String::from("Invalid Request"),
             headers: HashMap::new(),
-            body,
+            body: String::from(""),
             duration_ms: 0,
         }
     }
 }
 
-/// Send an HTTP request and return the response
 pub fn send_request(request: &Request) -> Result<Response, Box<dyn std::error::Error>> {
-    // TODO: Implement actual HTTP request sending
-    // This is where you'll implement the core HTTP functionality using reqwest
-    //
-    // Steps:
-    // 1. Create a reqwest client
-    // 2. Build the request with method, URL, headers, and body
-    // 3. Send the request and measure duration
-    // 4. Parse the response (status, headers, body)
-    // 5. Return a Response struct
-    //
-    // Example skeleton:
-    // let client = reqwest::blocking::Client::new();
-    // let start = std::time::Instant::now();
-    //
-    // let mut req_builder = match request.method {
-    //     Method::GET => client.get(&request.url),
-    //     Method::POST => client.post(&request.url),
-    //     Method::PUT => client.put(&request.url),
-    //     Method::DELETE => client.delete(&request.url),
-    //     Method::PATCH => client.patch(&request.url),
-    //     Method::HEAD => client.head(&request.url),
-    //     Method::OPTIONS => todo!("OPTIONS not directly supported"),
-    // };
-    //
-    // for (key, value) in &request.headers {
-    //     req_builder = req_builder.header(key, value);
-    // }
-    //
-    // if !request.body.is_empty() {
-    //     req_builder = req_builder.body(request.body.clone());
-    // }
-    //
-    // let resp = req_builder.send()?;
-    // let duration = start.elapsed().as_millis();
-    //
-    // let status = resp.status().as_u16();
-    // let status_text = resp.status().to_string();
-    // let body = resp.text()?;
-    //
-    // Ok(Response {
-    //     status,
-    //     status_text,
-    //     headers: HashMap::new(), // TODO: Parse response headers
-    //     body,
-    //     duration_ms: duration,
-    // })
+    let client = reqwest::blocking::Client::new();
+    let start = std::time::Instant::now();
 
-    // For now, return a placeholder error
-    Err("HTTP request sending not yet implemented".into())
-}
+    let mut req_builder = match request.method {
+        Method::GET => client.get(&request.url),
+        Method::POST => client.post(&request.url),
+        Method::PUT => client.put(&request.url),
+        Method::DELETE => client.delete(&request.url),
+        Method::PATCH => client.patch(&request.url),
+    };
 
-/// Validate a URL
-pub fn is_valid_url(url: &str) -> bool {
-    // TODO: Implement URL validation
-    // Check if the URL is well-formed
-    // Could use url crate or simple regex
-    !url.is_empty()
+    let mut headers = HashMap::new();
+
+    for (key, value) in &request.headers {
+        req_builder = req_builder.header(key, value);
+        headers.insert(key.to_string(), value.to_string());
+    }
+
+    if !request.body.is_empty() {
+        req_builder = req_builder.body(request.body.clone());
+    }
+
+    let resp = req_builder.send()?;
+    let duration = start.elapsed().as_millis();
+
+    let status = resp.status().as_u16();
+    let status_text = resp.status().to_string();
+    let body = resp.text()?;
+
+    Ok(Response {
+        status,
+        status_text,
+        headers,
+        body,
+        duration_ms: duration,
+    })
 }

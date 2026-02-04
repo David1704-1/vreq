@@ -1,10 +1,8 @@
-use crate::app::{App, Mode, Panel, PendingCommand};
+use crate::{app::{App, Mode, Panel, PendingCommand}, http::{Request, send_request, Method}};
 use crossterm::event::{KeyCode, KeyEvent};
 
-/// Handle key events in Normal mode
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
-        // Mode switching
         KeyCode::Char('i') => {
             app.set_mode(Mode::Insert);
             // TODO: Position cursor based on 'i', 'a', 'I', 'A' variants
@@ -25,9 +23,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.set_mode(Mode::Command);
         }
 
-        // Panel navigation
         KeyCode::Tab => {
-            // Sidebar -> Url -> Headers -> Body -> Response -> Sidebar
             match app.active_panel {
                 Panel::Sidebar => app.set_panel(Panel::Url),
                 Panel::Url => app.set_panel(Panel::Headers),
@@ -51,24 +47,19 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('4') => app.set_panel(Panel::Body),
         KeyCode::Char('5') => app.set_panel(Panel::Response),
 
-        // Vim motions
         KeyCode::Char('h') => {
-            // Move cursor left
             let cursor = app.cursor();
             if cursor > 0 {
                 app.set_cursor(cursor - 1);
             }
         }
         KeyCode::Char('j') => {
-            // Move cursor down (multi-line aware)
             app.move_cursor_down();
         }
         KeyCode::Char('k') => {
-            // Move cursor up (multi-line aware)
             app.move_cursor_up();
         }
         KeyCode::Char('l') => {
-            // Move cursor right
             let cursor = app.cursor();
             let buffer_len = app.current_buffer().len();
             if cursor < buffer_len {
@@ -82,7 +73,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.move_word_backwards();
         }
         KeyCode::Char('0') => {
-            // Move cursor to start of current line
             let buffer = app.current_buffer();
             let cursor = app.cursor();
             let (line, _) = app.cursor_to_line_col(buffer, cursor);
@@ -105,7 +95,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                                 if current_line < lines.len() {
                                     if let Some(delete_line) = lines[current_line].get(0..line_cursor) {
                                         lines[current_line] =  delete_line.to_string();
-                                    } 
+                                    }
                                     *buffer = lines.join("\n");
                                 }
                             }
@@ -122,7 +112,7 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                                 let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
                                 if let Some(yank_line) = lines[current_line].get(0..line_cursor) {
                                     app.set_yank_register(yank_line.to_string());
-                                } 
+                                }
                             }
                             app.clear_pending_command();
                         },
@@ -130,7 +120,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                     }
                 },
                 _ => {
-                    // Move cursor to end of current line
                     let buffer = app.current_buffer();
                     let cursor = app.cursor();
                     let (line, _) = app.cursor_to_line_col(buffer, cursor);
@@ -141,7 +130,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                         let new_cursor = app.line_col_to_cursor(buffer, line, line_len);
                         app.set_cursor(new_cursor);
                     }
-
                 }
             }
         }
@@ -155,26 +143,26 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('G') => {
             let buffer = app.current_buffer();
-
             let lines: Vec<&str> = buffer.lines().collect();
             let last_line = lines.len() - 1;
             let new_cursor = app.line_col_to_cursor(buffer, last_line, 0);
             app.set_cursor(new_cursor);
         }
 
-        // Actions
         KeyCode::Enter => {
-            // TODO: Send HTTP request
-            // This should:
-            // 1. Build request from current state
-            // 2. Send it using http::send_request()
-            // 3. Store response in app.last_response
-            // 4. Switch active panel to Response
+            let mut req = Request::new(app.current_request.method, app.url_buffer.clone());
+            for (key, value) in app.parsed_headers() {
+                req.headers.insert(key, value);
+            }
+            req.body = app.body_buffer.clone();
+            app.current_request = req;
+            let response = send_request(&app.current_request).unwrap_or_default();
+            app.last_response = Some(response);
+            app.update_response_buffer();
+            app.set_panel(Panel::Response);
         }
         KeyCode::Char('d') => {
-            // TODO: Delete with motions (dw - delete word, d$ - delete to end of line)
             if let Some(cmd) = app.pending_command && cmd == PendingCommand::Delete {
-                // dd - delete current line
                 let cursor = app.cursor();
                 let current_line = {
                     let buffer = app.current_buffer();
@@ -182,7 +170,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                     line
                 };
 
-                // Perform the deletion
                 if let Some(buffer) = app.current_buffer_mut() {
                     let mut lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
 
@@ -192,7 +179,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                     }
                 }
 
-                // Calculate new cursor position after deletion (mutable borrow has ended)
                 let buffer = app.current_buffer();
                 let lines: Vec<&str> = buffer.lines().collect();
                 let new_line = current_line.min(lines.len().saturating_sub(1));
@@ -222,7 +208,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
 
                     if current_line < lines.len() {
                         app.set_yank_register(lines[current_line].to_string());
-
                     }
                 }
 
@@ -260,17 +245,20 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
                 app.set_cursor(new_cursor);
             }
         }
+        KeyCode::Char('v') => {
+            app.set_panel(Panel::Response);
+            let cursor = *app.cursors.get(&Panel::Response).unwrap_or(&0);
+            app.visual_anchor = Some(cursor);
+            app.set_mode(Mode::Visual);
+        }
         KeyCode::Char('u') => {
             // TODO: Undo last change
         }
 
-        // Quit shortcut (in normal mode, 'q' could quit)
         KeyCode::Char('q') => {
             app.should_quit = true;
         }
 
-        _ => {
-            // Ignore unhandled keys in normal mode
-        }
+        _ => {}
     }
 }

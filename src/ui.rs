@@ -2,38 +2,32 @@ use crate::app::{App, Mode, Panel};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
 
-/// Main render function - draws the entire UI
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(0),      // Main content
-            Constraint::Length(1),   // Status line
+            Constraint::Min(0),
+            Constraint::Length(1),
         ])
         .split(f.area());
 
-    // Render main content (3-column layout)
     render_main_content(f, app, chunks[0]);
-
-    // Render status line at bottom (mode indicator + command line)
     render_status_line(f, app, chunks[1]);
-
-    // Set cursor position based on mode and active panel
     set_cursor(f, app);
 }
 
-/// Render the main 3-column layout
-fn render_main_content(f: &mut Frame, app: &App, area: Rect) {
+fn render_main_content(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(20),  // Sidebar
-            Constraint::Percentage(40),  // Request builder
-            Constraint::Percentage(40),  // Response viewer
+            Constraint::Percentage(20),
+            Constraint::Percentage(40),
+            Constraint::Percentage(40),
         ])
         .split(area);
 
@@ -42,7 +36,6 @@ fn render_main_content(f: &mut Frame, app: &App, area: Rect) {
     render_response_viewer(f, app, chunks[2]);
 }
 
-/// Render the sidebar (collections/history)
 fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.active_panel == Panel::Sidebar;
     let border_style = if is_focused {
@@ -77,14 +70,13 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // TODO: Add ability to load saved requests
 }
 
-/// Render the request builder (URL, headers, body)
-fn render_request_builder(f: &mut Frame, app: &App, area: Rect) {
+fn render_request_builder(f: &mut Frame, app: &mut App, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),      // URL input
-            Constraint::Length(8),      // Headers
-            Constraint::Min(0),         // Body
+            Constraint::Length(3),
+            Constraint::Length(8),
+            Constraint::Min(0),
         ])
         .split(area);
 
@@ -93,7 +85,6 @@ fn render_request_builder(f: &mut Frame, app: &App, area: Rect) {
     render_body_input(f, app, chunks[2]);
 }
 
-/// Render the URL input panel
 fn render_url_input(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.active_panel == Panel::Url;
     let border_style = if is_focused {
@@ -102,23 +93,21 @@ fn render_url_input(f: &mut Frame, app: &App, area: Rect) {
         Style::default()
     };
 
+    let title = format!("URL({})", app.current_request.method);
     let url_widget = Paragraph::new(app.url_buffer.as_str())
         .block(
             Block::default()
-                .title("URL (GET)")
+                .title(title)
                 .borders(Borders::ALL)
                 .border_style(border_style),
         );
 
     f.render_widget(url_widget, area);
 
-    // TODO: Show cursor position when in Insert mode
-    // TODO: Implement text editing (insert, delete, move cursor)
     // TODO: Add HTTP method selector (GET, POST, PUT, DELETE, etc.)
 }
 
-/// Render the headers table
-fn render_headers_table(f: &mut Frame, app: &App, area: Rect) {
+fn render_headers_table(f: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = app.active_panel == Panel::Headers;
     let border_style = if is_focused {
         Style::default().fg(Color::Cyan)
@@ -126,16 +115,16 @@ fn render_headers_table(f: &mut Frame, app: &App, area: Rect) {
         Style::default()
     };
 
-    // Format headers as list items
-    let items: Vec<ListItem> = app
-        .headers
-        .iter()
-        .map(|(key, value)| {
-            ListItem::new(format!("{}: {}", key, value))
-        })
-        .collect();
+    let visible_rows = area.height.saturating_sub(2);
+    let cursor_line = {
+        let (line, _) = app.cursor_to_line_col(&app.headers_buffer, app.cursor());
+        line as u16
+    };
+    app.update_scroll(Panel::Headers, cursor_line, visible_rows);
+    let scroll = app.scroll_offset(Panel::Headers);
 
-    let headers_list = List::new(items)
+    let headers_widget = Paragraph::new(app.headers_buffer.as_str())
+        .scroll((scroll, 0))
         .block(
             Block::default()
                 .title("Headers")
@@ -143,15 +132,10 @@ fn render_headers_table(f: &mut Frame, app: &App, area: Rect) {
                 .border_style(border_style),
         );
 
-    f.render_widget(headers_list, area);
-
-    // TODO: Implement table-like editing (navigate rows, edit key/value)
-    // TODO: Add ability to add/remove headers
-    // TODO: Highlight selected row
+    f.render_widget(headers_widget, area);
 }
 
-/// Render the request body input
-fn render_body_input(f: &mut Frame, app: &App, area: Rect) {
+fn render_body_input(f: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = app.active_panel == Panel::Body;
     let border_style = if is_focused {
         Style::default().fg(Color::Cyan)
@@ -159,7 +143,16 @@ fn render_body_input(f: &mut Frame, app: &App, area: Rect) {
         Style::default()
     };
 
+    let visible_rows = area.height.saturating_sub(2);
+    let cursor_line = {
+        let (line, _) = app.cursor_to_line_col(&app.body_buffer, app.cursor());
+        line as u16
+    };
+    app.update_scroll(Panel::Body, cursor_line, visible_rows);
+    let scroll = app.scroll_offset(Panel::Body);
+
     let body_widget = Paragraph::new(app.body_buffer.as_str())
+        .scroll((scroll, 0))
         .block(
             Block::default()
                 .title("Body")
@@ -168,14 +161,9 @@ fn render_body_input(f: &mut Frame, app: &App, area: Rect) {
         );
 
     f.render_widget(body_widget, area);
-
-    // TODO: Multi-line text editing
-    // TODO: Syntax highlighting for JSON
-    // TODO: Body type selector (JSON, form-data, raw, etc.)
 }
 
-/// Render the response viewer
-fn render_response_viewer(f: &mut Frame, app: &App, area: Rect) {
+fn render_response_viewer(f: &mut Frame, app: &mut App, area: Rect) {
     let is_focused = app.active_panel == Panel::Response;
     let border_style = if is_focused {
         Style::default().fg(Color::Cyan)
@@ -183,16 +171,31 @@ fn render_response_viewer(f: &mut Frame, app: &App, area: Rect) {
         Style::default()
     };
 
-    let response_text = if let Some(ref response) = app.last_response {
-        // TODO: Format response nicely (status, headers, body)
-        // TODO: Syntax highlighting for JSON responses
-        // TODO: Add tabs for different views (body, headers, timing)
-        format!("Status: {}\n\n{}", response.status, response.body)
+    let visible_rows = area.height.saturating_sub(2);
+    let cursor_line = {
+        let cursor = *app.cursors.get(&Panel::Response).unwrap_or(&0);
+        let (line, _) = app.cursor_to_line_col(&app.response_buffer, cursor);
+        line as u16
+    };
+    app.update_scroll(Panel::Response, cursor_line, visible_rows);
+    let scroll = app.scroll_offset(Panel::Response);
+
+    let raw = &app.response_buffer;
+    let text = if app.mode == Mode::Visual {
+        if let Some(anchor) = app.visual_anchor {
+            let cursor = *app.cursors.get(&Panel::Response).unwrap_or(&0);
+            let start = anchor.min(cursor);
+            let end = (anchor.max(cursor) + 1).min(raw.len());
+            build_highlighted_text(raw, start, end)
+        } else {
+            Text::raw(raw.as_str())
+        }
     } else {
-        "No response yet. Press Enter to send request.".to_string()
+        Text::raw(raw.as_str())
     };
 
-    let response_widget = Paragraph::new(response_text)
+    let response_widget = Paragraph::new(text)
+        .scroll((scroll, 0))
         .block(
             Block::default()
                 .title("Response")
@@ -203,12 +206,12 @@ fn render_response_viewer(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(response_widget, area);
 }
 
-/// Render the status line (shows mode and command input)
 fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
     let mode_text = match app.mode {
         Mode::Normal => "-- NORMAL --",
         Mode::Insert => "-- INSERT --",
-        Mode::Command => "",  // Command line will show the actual command
+        Mode::Visual => "-- VISUAL --",
+        Mode::Command => "",
     };
 
     let content = if app.mode == Mode::Command {
@@ -227,46 +230,38 @@ fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(status_line, area);
 }
 
-/// Set cursor position based on current mode and active panel
 fn set_cursor(f: &mut Frame, app: &App) {
-    // Only show cursor in Normal and Insert modes (not Command mode)
-    // Command mode has its own cursor in the status line
-    if app.mode != Mode::Normal && app.mode != Mode::Insert {
+    if app.mode == Mode::Command {
         return;
     }
 
-    // Only show cursor for editable text panels
     match app.active_panel {
-        Panel::Url | Panel::Body => {
+        Panel::Url | Panel::Headers | Panel::Body | Panel::Response => {
             if let Some((x, y)) = calculate_cursor_position(f, app) {
                 f.set_cursor_position((x, y));
             }
         }
-        _ => {
-            // No cursor for sidebar, headers, or response panels
-        }
+        _ => {}
     }
 }
 
-/// Calculate the screen position of the cursor
 fn calculate_cursor_position(f: &mut Frame, app: &App) -> Option<(u16, u16)> {
     let area = f.area();
 
-    // Recreate the layout to get panel positions
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(0),      // Main content
-            Constraint::Length(1),   // Status line
+            Constraint::Min(0),
+            Constraint::Length(1),
         ])
         .split(area);
 
     let horizontal_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(20),  // Sidebar
-            Constraint::Percentage(40),  // Request builder
-            Constraint::Percentage(40),  // Response viewer
+            Constraint::Percentage(20),
+            Constraint::Percentage(40),
+            Constraint::Percentage(40),
         ])
         .split(main_chunks[0]);
 
@@ -275,9 +270,9 @@ fn calculate_cursor_position(f: &mut Frame, app: &App) -> Option<(u16, u16)> {
     let vertical_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),      // URL input
-            Constraint::Length(8),      // Headers
-            Constraint::Min(0),         // Body
+            Constraint::Length(3),
+            Constraint::Length(8),
+            Constraint::Min(0),
         ])
         .split(request_builder_area);
 
@@ -285,9 +280,6 @@ fn calculate_cursor_position(f: &mut Frame, app: &App) -> Option<(u16, u16)> {
         Panel::Url => {
             let url_area = vertical_chunks[0];
             let cursor = app.cursor();
-
-            // Cursor is inside the border: +1 for left border, +1 for top border
-            // Cursor position is clamped to buffer length
             let cursor_offset = cursor.min(app.url_buffer.len()) as u16;
 
             Some((
@@ -295,22 +287,77 @@ fn calculate_cursor_position(f: &mut Frame, app: &App) -> Option<(u16, u16)> {
                 url_area.y + 1,
             ))
         }
+        Panel::Headers => {
+            let headers_area = vertical_chunks[1];
+            let cursor = app.cursor();
+            let (line, col) = app.cursor_to_line_col(&app.headers_buffer, cursor);
+            let scroll = app.scroll_offset(Panel::Headers);
+
+            Some((
+                headers_area.x + 1 + col as u16,
+                headers_area.y + 1 + line as u16 - scroll,
+            ))
+        }
         Panel::Body => {
             let body_area = vertical_chunks[2];
             let cursor = app.cursor();
-            let buffer = &app.body_buffer;
+            let (line, col) = app.cursor_to_line_col(&app.body_buffer, cursor);
+            let scroll = app.scroll_offset(Panel::Body);
 
-            // Convert cursor position to (line, column)
-            let (line, col) = app.cursor_to_line_col(buffer, cursor);
-
-            // Calculate screen position
-            // x = left border (1) + column position
-            // y = top border (1) + line number
             Some((
                 body_area.x + 1 + col as u16,
-                body_area.y + 1 + line as u16,
+                body_area.y + 1 + line as u16 - scroll,
+            ))
+        }
+        Panel::Response => {
+            let response_area = horizontal_chunks[2];
+            let cursor = *app.cursors.get(&Panel::Response).unwrap_or(&0);
+            let buffer = app.response_text();
+            let (line, col) = app.cursor_to_line_col(buffer, cursor);
+            let scroll = app.scroll_offset(Panel::Response);
+
+            Some((
+                response_area.x + 1 + col as u16,
+                response_area.y + 1 + line as u16 - scroll,
             ))
         }
         _ => None,
     }
+}
+
+fn build_highlighted_text(raw: &str, start: usize, end: usize) -> Text<'_> {
+    let normal_style = Style::default();
+    let sel_style = Style::default()
+        .bg(Color::Cyan)
+        .fg(Color::Black)
+        .add_modifier(Modifier::BOLD);
+
+    let mut lines = Vec::new();
+    let mut pos = 0;
+
+    for line_str in raw.lines() {
+        let line_start = pos;
+        let line_end = pos + line_str.len();
+        pos = line_end + 1;
+
+        if end <= line_start || start >= line_end {
+            lines.push(Line::from(Span::styled(line_str, normal_style)));
+            continue;
+        }
+
+        let sel_start = start.max(line_start) - line_start;
+        let sel_end = end.min(line_end) - line_start;
+
+        let mut spans = Vec::new();
+        if sel_start > 0 {
+            spans.push(Span::styled(&line_str[..sel_start], normal_style));
+        }
+        spans.push(Span::styled(&line_str[sel_start..sel_end], sel_style));
+        if sel_end < line_str.len() {
+            spans.push(Span::styled(&line_str[sel_end..], normal_style));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    Text::from(lines)
 }

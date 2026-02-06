@@ -1,4 +1,4 @@
-use crate::{http::{Request, Response}, persistence::{Collection, list_collections}};
+use crate::http::{Request, Response};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,7 @@ pub struct App {
     pub collections: Vec<String>,
     pub yank_register: Option<String>,
     pub visual_anchor: Option<usize>,
+    pub selected_collection_index: usize,
 }
 
 impl App {
@@ -75,6 +76,7 @@ impl App {
             pending_command: None,
             yank_register: None,
             visual_anchor: None,
+            selected_collection_index: 0,
         }
     }
 
@@ -285,6 +287,22 @@ impl App {
         }
 
         self.set_cursor(cursor);
+    }
+
+    pub fn select_next_collection(&mut self) {
+        if !self.collections.is_empty() && self.selected_collection_index < self.collections.len() - 1 {
+            self.selected_collection_index += 1;
+        }
+    }
+
+    pub fn select_previous_collection(&mut self) {
+        if self.selected_collection_index > 0 {
+            self.selected_collection_index -= 1;
+        }
+    }
+
+    pub fn selected_collection(&self) -> Option<&str> {
+        self.collections.get(self.selected_collection_index).map(|s| s.as_str())
     }
 }
 

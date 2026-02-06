@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
@@ -47,7 +47,10 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .collections
         .iter()
-        .map(|name| ListItem::new(name.as_str()))
+        .map(|name| {
+            let display_name = name.strip_suffix(".json").unwrap_or(name);
+            ListItem::new(display_name)
+        })
         .collect();
 
     let list = List::new(items)
@@ -60,14 +63,16 @@ fn render_sidebar(f: &mut Frame, app: &App, area: Rect) {
         .highlight_style(
             Style::default()
                 .add_modifier(Modifier::BOLD)
-                .bg(Color::DarkGray),
-        );
+                .bg(Color::DarkGray)
+                .fg(Color::White),
+        )
+        .highlight_symbol(">> ");
 
-    f.render_widget(list, area);
+    // Create a ListState to track the selected item
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.selected_collection_index));
 
-    // TODO: Implement sidebar selection highlighting
-    // TODO: Add keyboard navigation (j/k to move selection)
-    // TODO: Add ability to load saved requests
+    f.render_stateful_widget(list, area, &mut list_state);
 }
 
 fn render_request_builder(f: &mut Frame, app: &mut App, area: Rect) {
@@ -103,8 +108,6 @@ fn render_url_input(f: &mut Frame, app: &App, area: Rect) {
         );
 
     f.render_widget(url_widget, area);
-
-    // TODO: Add HTTP method selector (GET, POST, PUT, DELETE, etc.)
 }
 
 fn render_headers_table(f: &mut Frame, app: &mut App, area: Rect) {

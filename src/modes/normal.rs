@@ -1,46 +1,33 @@
-use crate::{app::{App, Mode, Panel, PendingCommand}, http::{Request, send_request}};
+use crate::{
+    app::{App, Mode, Panel, PendingCommand},
+    http::{Request, send_request},
+    persistence::load_collection,
+};
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('i') => {
             app.set_mode(Mode::Insert);
-            // TODO: Position cursor based on 'i', 'a', 'I', 'A' variants
-        }
-        KeyCode::Char('a') => {
-            app.set_mode(Mode::Insert);
-            // TODO: Move cursor one position right (insert after)
-        }
-        KeyCode::Char('I') => {
-            app.set_mode(Mode::Insert);
-            // TODO: Move cursor to start of line
-        }
-        KeyCode::Char('A') => {
-            app.set_mode(Mode::Insert);
-            // TODO: Move cursor to end of line
         }
         KeyCode::Char(':') => {
             app.set_mode(Mode::Command);
         }
 
-        KeyCode::Tab => {
-            match app.active_panel {
-                Panel::Sidebar => app.set_panel(Panel::Url),
-                Panel::Url => app.set_panel(Panel::Headers),
-                Panel::Headers => app.set_panel(Panel::Body),
-                Panel::Body => app.set_panel(Panel::Response),
-                Panel::Response => app.set_panel(Panel::Sidebar),
-            }
-        }
-        KeyCode::BackTab => {
-            match app.active_panel {
-                Panel::Sidebar => app.set_panel(Panel::Response),
-                Panel::Url => app.set_panel(Panel::Sidebar),
-                Panel::Headers => app.set_panel(Panel::Url),
-                Panel::Body => app.set_panel(Panel::Headers),
-                Panel::Response => app.set_panel(Panel::Body),
-            }
-        }
+        KeyCode::Tab => match app.active_panel {
+            Panel::Sidebar => app.set_panel(Panel::Url),
+            Panel::Url => app.set_panel(Panel::Headers),
+            Panel::Headers => app.set_panel(Panel::Body),
+            Panel::Body => app.set_panel(Panel::Response),
+            Panel::Response => app.set_panel(Panel::Sidebar),
+        },
+        KeyCode::BackTab => match app.active_panel {
+            Panel::Sidebar => app.set_panel(Panel::Response),
+            Panel::Url => app.set_panel(Panel::Sidebar),
+            Panel::Headers => app.set_panel(Panel::Url),
+            Panel::Body => app.set_panel(Panel::Headers),
+            Panel::Response => app.set_panel(Panel::Body),
+        },
         KeyCode::Char('1') => app.set_panel(Panel::Sidebar),
         KeyCode::Char('2') => app.set_panel(Panel::Url),
         KeyCode::Char('3') => app.set_panel(Panel::Headers),
@@ -54,10 +41,18 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('j') => {
-            app.move_cursor_down();
+            if app.active_panel == Panel::Sidebar {
+                app.select_next_collection();
+            } else {
+                app.move_cursor_down();
+            }
         }
         KeyCode::Char('k') => {
-            app.move_cursor_up();
+            if app.active_panel == Panel::Sidebar {
+                app.select_previous_collection();
+            } else {
+                app.move_cursor_up();
+            }
         }
         KeyCode::Char('l') => {
             let cursor = app.cursor();
@@ -79,62 +74,61 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             let new_cursor = app.line_col_to_cursor(buffer, line, 0);
             app.set_cursor(new_cursor);
         }
-        KeyCode::Char('$') => {
-            match app.pending_command {
-                Some(cmd) => {
-                    match cmd {
-                        PendingCommand::Delete => {
-                            let cursor = app.cursor();
-                            let (current_line, line_cursor) = {
-                                let buffer = app.current_buffer();
-                                app.cursor_to_line_col(buffer, cursor)
-                            };
-
-                            if let Some(buffer) = app.current_buffer_mut() {
-                                let mut lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
-                                if current_line < lines.len() {
-                                    if let Some(delete_line) = lines[current_line].get(0..line_cursor) {
-                                        lines[current_line] =  delete_line.to_string();
-                                    }
-                                    *buffer = lines.join("\n");
-                                }
-                            }
-                            app.clear_pending_command();
-                        },
-                        PendingCommand::Yank => {
-                            let cursor = app.cursor();
-                            let (current_line, line_cursor) = {
-                                let buffer = app.current_buffer();
-                                app.cursor_to_line_col(buffer, cursor)
-                            };
-
-                            if let Some(buffer) = app.current_buffer_mut() {
-                                let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
-                                if let Some(yank_line) = lines[current_line].get(0..line_cursor) {
-                                    app.set_yank_register(yank_line.to_string());
-                                }
-                            }
-                            app.clear_pending_command();
-                        },
-                        PendingCommand::Goto => {},
-                    }
-                },
-                _ => {
-                    let buffer = app.current_buffer();
+        KeyCode::Char('$') => match app.pending_command {
+            Some(cmd) => match cmd {
+                PendingCommand::Delete => {
                     let cursor = app.cursor();
-                    let (line, _) = app.cursor_to_line_col(buffer, cursor);
+                    let (current_line, line_cursor) = {
+                        let buffer = app.current_buffer();
+                        app.cursor_to_line_col(buffer, cursor)
+                    };
 
-                    let lines: Vec<&str> = buffer.lines().collect();
-                    if line < lines.len() {
-                        let line_len = lines[line].len();
-                        let new_cursor = app.line_col_to_cursor(buffer, line, line_len);
-                        app.set_cursor(new_cursor);
+                    if let Some(buffer) = app.current_buffer_mut() {
+                        let mut lines: Vec<String> =
+                            buffer.lines().map(|s| s.to_string()).collect();
+                        if current_line < lines.len() {
+                            if let Some(delete_line) = lines[current_line].get(0..line_cursor) {
+                                lines[current_line] = delete_line.to_string();
+                            }
+                            *buffer = lines.join("\n");
+                        }
                     }
+                    app.clear_pending_command();
+                }
+                PendingCommand::Yank => {
+                    let cursor = app.cursor();
+                    let (current_line, line_cursor) = {
+                        let buffer = app.current_buffer();
+                        app.cursor_to_line_col(buffer, cursor)
+                    };
+
+                    if let Some(buffer) = app.current_buffer_mut() {
+                        let lines: Vec<String> = buffer.lines().map(|s| s.to_string()).collect();
+                        if let Some(yank_line) = lines[current_line].get(0..line_cursor) {
+                            app.set_yank_register(yank_line.to_string());
+                        }
+                    }
+                    app.clear_pending_command();
+                }
+                PendingCommand::Goto => {}
+            },
+            _ => {
+                let buffer = app.current_buffer();
+                let cursor = app.cursor();
+                let (line, _) = app.cursor_to_line_col(buffer, cursor);
+
+                let lines: Vec<&str> = buffer.lines().collect();
+                if line < lines.len() {
+                    let line_len = lines[line].len();
+                    let new_cursor = app.line_col_to_cursor(buffer, line, line_len);
+                    app.set_cursor(new_cursor);
                 }
             }
-        }
+        },
         KeyCode::Char('g') => {
-            if let Some(cmd) = app.pending_command && cmd == PendingCommand::Goto {
+            if let Some(cmd) = app.pending_command
+                && cmd == PendingCommand::Goto
+            {
                 app.set_cursor(0);
                 app.clear_pending_command();
             } else if app.pending_command.is_none() {
@@ -150,19 +144,46 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
         }
 
         KeyCode::Enter => {
-            let mut req = Request::new(app.current_request.method, app.url_buffer.clone());
-            for (key, value) in app.parsed_headers() {
-                req.headers.insert(key, value);
+            if app.active_panel == Panel::Sidebar {
+                if let Some(collection_name) = app.selected_collection() {
+                    let name = collection_name
+                        .strip_suffix(".json")
+                        .unwrap_or(collection_name);
+                    if let Ok(collection) = load_collection(name) {
+                        let request = &collection.saved_request.request;
+                        app.url_buffer = request.url.clone();
+                        app.body_buffer = request.body.clone();
+
+                        let headers_str = request
+                            .headers
+                            .iter()
+                            .map(|(k, v)| format!("{}: {}", k, v))
+                            .collect::<Vec<_>>()
+                            .join("\n");
+                        app.headers_buffer = headers_str;
+
+                        app.current_request = request.clone();
+
+                        app.set_panel(Panel::Url);
+                    }
+                }
+            } else {
+                let mut req = Request::new(app.current_request.method, app.url_buffer.clone());
+                for (key, value) in app.parsed_headers() {
+                    req.headers.insert(key, value);
+                }
+                req.body = app.body_buffer.clone();
+                app.current_request = req;
+                let response = send_request(&app.current_request).unwrap_or_default();
+                app.last_response = Some(response);
+                app.update_response_buffer();
+                app.set_panel(Panel::Response);
             }
-            req.body = app.body_buffer.clone();
-            app.current_request = req;
-            let response = send_request(&app.current_request).unwrap_or_default();
-            app.last_response = Some(response);
-            app.update_response_buffer();
-            app.set_panel(Panel::Response);
         }
         KeyCode::Char('d') => {
-            if let Some(cmd) = app.pending_command && cmd == PendingCommand::Delete {
+            if let Some(cmd) = app.pending_command
+                && cmd == PendingCommand::Delete
+            {
                 let cursor = app.cursor();
                 let current_line = {
                     let buffer = app.current_buffer();
@@ -195,7 +216,9 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('y') => {
-            if let Some(cmd) = app.pending_command && cmd == PendingCommand::Yank {
+            if let Some(cmd) = app.pending_command
+                && cmd == PendingCommand::Yank
+            {
                 let cursor = app.cursor();
                 let current_line = {
                     let buffer = app.current_buffer();
@@ -251,10 +274,6 @@ pub fn handle_key(app: &mut App, key: KeyEvent) {
             app.visual_anchor = Some(cursor);
             app.set_mode(Mode::Visual);
         }
-        KeyCode::Char('u') => {
-            // TODO: Undo last change
-        }
-
         KeyCode::Char('q') => {
             app.should_quit = true;
         }
